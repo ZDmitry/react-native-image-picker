@@ -6,7 +6,9 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
 import android.net.Uri;
 import android.provider.MediaStore;
 import android.provider.Settings;
@@ -419,7 +421,7 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
     BitmapFactory.decodeFile(imageConfig.original.getAbsolutePath(), options);
     int initialWidth = options.outWidth;
     int initialHeight = options.outHeight;
-    updatedResultResponse(uri, imageConfig.original.getAbsolutePath());
+    updatedResultResponse(uri, imageConfig.original.getAbsolutePath(), result.currentRotation);
 
     // don't create a new file if contraint are respected
     if (imageConfig.useOriginal(initialWidth, initialHeight, result.currentRotation))
@@ -443,7 +445,7 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
         responseHelper.putInt("width", options.outWidth);
         responseHelper.putInt("height", options.outHeight);
 
-        updatedResultResponse(uri, imageConfig.resized.getAbsolutePath());
+        updatedResultResponse(uri, imageConfig.resized.getAbsolutePath(), result.currentRotation);
         fileScan(reactContext, imageConfig.resized.getAbsolutePath());
       }
     }
@@ -456,7 +458,7 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
       {
         imageConfig = rolloutResult.imageConfig;
         uri = Uri.fromFile(imageConfig.getActualFile());
-        updatedResultResponse(uri, imageConfig.getActualFile().getAbsolutePath());
+        updatedResultResponse(uri, imageConfig.getActualFile().getAbsolutePath(), result.currentRotation);
       }
       else
       {
@@ -505,13 +507,15 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
   }
 
   private void updatedResultResponse(@Nullable final Uri uri,
-                                     @NonNull final String path)
+                                     @NonNull final String path,
+                                     @NonNull final Integer orientation)
   {
     responseHelper.putString("uri", uri.toString());
     responseHelper.putString("path", path);
+    responseHelper.putInt("orientation", orientation);
 
     if (!noData) {
-      responseHelper.putString("data", getBase64StringFromFile(path));
+      responseHelper.putString("data", getBase64StringFromFile(path, orientation));
     }
 
     putExtraFileInfo(path, responseHelper);
@@ -639,27 +643,27 @@ public class ImagePickerModule extends ReactContextBaseJavaModule
     return file;
   }
 
-  private String getBase64StringFromFile(String absoluteFilePath) {
-    InputStream inputStream = null;
-    try {
-      inputStream = new FileInputStream(new File(absoluteFilePath));
-    } catch (FileNotFoundException e) {
-      e.printStackTrace();
+  private String getBase64StringFromFile(String absoluteFilePath, int orientation) {
+    BitmapFactory.Options imageOptions = new BitmapFactory.Options();
+    imageOptions.inScaled = false;
+
+    Bitmap photo = BitmapFactory.decodeFile(absoluteFilePath, imageOptions);
+
+    Matrix matrix = new Matrix();
+    matrix.postRotate(orientation);
+
+    Bitmap rotatedPhoto = Bitmap.createBitmap(photo, 0, 0, photo.getWidth(), photo.getHeight(), matrix, true);
+    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    rotatedPhoto.compress(Bitmap.CompressFormat.JPEG, 95, bytes);
+
+    final String b64Image = Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP);
+
+    if (rotatedPhoto != null) {
+      rotatedPhoto.recycle();
+      rotatedPhoto = null;
     }
 
-    byte[] bytes;
-    byte[] buffer = new byte[8192];
-    int bytesRead;
-    ByteArrayOutputStream output = new ByteArrayOutputStream();
-    try {
-      while ((bytesRead = inputStream.read(buffer)) != -1) {
-        output.write(buffer, 0, bytesRead);
-      }
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
-    bytes = output.toByteArray();
-    return Base64.encodeToString(bytes, Base64.NO_WRAP);
+    return b64Image;
   }
 
   private void putExtraFileInfo(@NonNull final String path,
